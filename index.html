@@ -1,1 +1,219 @@
-<!DOCTYPE html> <html lang="zh"> <head> <meta charset="UTF-8"> <meta name="viewport" content="width=device-width, initial-scale=1.0"> <title>吕洞宾大战梁冀</title> <style> * { margin: 0; padding: 0; box-sizing: border-box; } body { background: #0a0a1a; display: flex; justify-content: center; align-items: center; min-height: 100vh; font-family: 'Microsoft YaHei', sans-serif; overflow: hidden; } #gameContainer { position: relative; width: 480px; height: 720px; } canvas { display: block; border-radius: 12px; box-shadow: 0 0 40px rgba(0,0,0,0.6); cursor: crosshair; } #ui { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; justify-content: space-between; color: #fff; font-size: 16px; text-shadow: 2px 2px 4px rgba(0,0,0,0.9); pointer-events: none; z-index: 10; } #startScreen, #gameOverScreen { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; background: rgba(0,0,0,0.75); border-radius: 12px; z-index: 20; } #startScreen h1, #gameOverScreen h1 { color: #ffd700; font-size: 30px; margin-bottom: 20px; text-shadow: 2px 2px 8px rgba(0,0,0,0.8); } #startScreen p, #gameOverScreen p { color: #ddd; font-size: 15px; margin-bottom: 8px; text-align: center; padding: 0 20px; } .btn { margin-top: 20px; padding: 12px 40px; font-size: 20px; background: #c0392b; color: #fff; border: none; border-radius: 8px; cursor: pointer; transition: transform 0.1s; font-family: 'Microsoft YaHei', sans-serif; } .btn:hover { transform: scale(1.05); background: #e74c3c; } .btn:active { transform: scale(0.95); } #finalScore { color: #ffd700; font-size: 28px; margin: 10px 0; } </style> </head> <body> <div id="gameContainer"> <canvas id="gameCanvas" width="480" height="720"></canvas> <div id="ui"> <span id="scoreText">分数: 0</span> <span id="levelText">关卡: 1</span> <span id="ammoText">弹药: 5</span> </div> <div id="startScreen"> <h1>🏹 吕洞宾大战梁冀</h1> <p>拖拽瞄准，松手发射吕洞宾</p > <p>消灭所有梁冀即可过关！</p > <p>⚠️ 小心方块里的梁冀会突然跳出来！</p > <button class="btn" id="startBtn">开始游戏</button> </div> <div id="gameOverScreen" style="display:none;"> <h1 id="endTitle">游戏结束</h1> <p id="endMsg"></p > <div id="finalScore"></div> <button class="btn" id="restartBtn">再来一次</button> </div> </div> <script> // ===== 音频系统 ===== var AudioCtx = window.AudioContext || window.webkitAudioContext; var audioCtx; function initAudio() { if (!audioCtx) audioCtx = new AudioCtx(); if (audioCtx.state === 'suspended') audioCtx.resume(); } function playNote(freq, duration, type, volume) { if (!audioCtx) return; type = type || 'square'; volume = volume || 0.15; var osc = audioCtx.createOscillator(); var gain = audioCtx.createGain(); osc.type = type; osc.frequency.value = freq; gain.gain.setValueAtTime(volume, audioCtx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration); osc.connect(gain); gain.connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime + duration); } function playLaunchSound() { if (!audioCtx) return; var osc = audioCtx.createOscillator(); var gain = audioCtx.createGain(); osc.type = 'square'; osc.frequency.setValueAtTime(200, audioCtx.currentTime); osc.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.15); gain.gain.setValueAtTime(0.12, audioCtx.currentTime); gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2); osc.connect(gain); gain.connect(audioCtx.destination); osc.start(); osc.stop(audioCtx.currentTime + 0.2); } function playHitSound() { playNote(300, 0.1, 'square', 0.15); setTimeout(function() { playNote(200, 0.15, 'sawtooth', 0.1); }, 50); } function playDestroySound() { playNote(523, 0.1, 'square', 0.12); setTimeout(function() { playNote(659, 0.1, 'square', 0.12); }, 80); setTimeout(function() { playNote(784, 0.15, 'square', 0.15); }, 160); } function playBoxOpenSound() { playNote(150, 0.15, 'sawtooth', 0.12); setTimeout(function() { playNote(100, 0.2, 'sawtooth', 0.1); }, 100); setTimeout(function() { playNote(250, 0.1, 'square', 0.15); }, 250); } function playGameOverSound() { playNote(400, 0.2, 'square', 0.12); setTimeout(function() { playNote(300, 0.2, 'square', 0.12); }, 200); setTimeout(function() { playNote(200, 0.4, 'sawtooth', 0.1); }, 400); } function playWinSound() { var notes = [523, 587, 659, 784, 880, 1047]; notes.forEach(function(freq, i) { setTimeout(function() { playNote(freq, 0.15, 'square', 0.12); }, i * 100); }); } // ===== BGM ===== var bgmInterval = null; var bgmMelody = [ [523,1],[587,1],[659,1],[784,1], [659,1],[587,1],[523,2], [784,1],[880,1],[784,1],[659,1], [587,1],[523,1],[587,2], [523,1],[659,1],[784,1],[880,1], [1047,2],[880,1],[784,1], [659,1],[523,1],[587,1],[659,1], [523,2],[0,2] ]; function startBGM() { if (bgmInterval) return; var noteIndex = 0; var tempo = 220; bgmInterval = setInterval(function() { if (!audioCtx) return; var note = bgmMelody[noteIndex % bgmMelody.length]; var freq = note[0]; var dur = note[1]; if (freq > 0) playNote(freq, (dur * tempo) / 1000, 'triangle', 0.06); noteIndex++; }, tempo); } function stopBGM() { if (bgmInterval) { clearInterval(bgmInterval); bgmInterval = null; } } // ===== 游戏核心 ===== var canvas = document.getElementById('gameCanvas'); var ctx = canvas.getContext('2d'); var W = canvas.width; var H = canvas.height; var score = 0; var level = 1; var ammo = 5; var gameRunning = false; var projectiles = []; var boxes = []; var enemies = []; var particles = []; var dragStart = null; var dragEnd = null; var isDragging = false; var launcher = { x: W / 2, y: H - 60, radius: 25 }; var levelConfigs = [ [ { x: 80, y: 120 }, { x: 240, y: 80 }, { x: 400, y: 120 } ], [ { x: 60, y: 100 }, { x: 180, y: 200 }, { x: 300, y: 100 }, { x: 420, y: 200 }, { x: 240, y: 300 } ], [ { x: 60, y: 80 }, { x: 160, y: 80 }, { x: 260, y: 80 }, { x: 360, y: 80 }, { x: 460, y: 80 }, { x: 120, y: 200 }, { x: 360, y: 200 } ], [ { x: 80, y: 100 }, { x: 240, y: 60 }, { x: 400, y: 100 }, { x: 160, y: 220 }, { x: 320, y: 220 }, { x: 240, y: 340 } ], [ { x: 60, y: 80 }, { x: 180, y: 80 }, { x: 300, y: 80 }, { x: 420, y: 80 }, { x: 120, y: 200 }, { x: 360, y: 200 }, { x: 180, y: 320 }, { x: 300, y: 320 } ] ]; // ===== 绘制背景 ===== function drawBackground() { var skyGrad = ctx.createLinearGradient(0, 0, 0, H); skyGrad.addColorStop(0, '#1a1a3e'); skyGrad.addColorStop(0.3, '#2d3a5c'); skyGrad.addColorStop(0.6, '#4a6741'); skyGrad.addColorStop(1, '#2d4a2d'); ctx.fillStyle = skyGrad; ctx.fillRect(0, 0, W, H); drawMountainLayer(0.15, '#1a2a1a', 280, 120); drawMountainLayer(0.25, '#1f3320', 320, 100); drawMountainLayer(0.35, '#264028', 370, 80); drawClouds(); drawGate(); var groundGrad = ctx.createLinearGradient(0, H - 100, 0, H); groundGrad.addColorStop(0, '#3d5c3a'); groundGrad.addColorStop(1, '#2a3d28'); ctx.fillStyle = groundGrad; ctx.fillRect(0, H - 100, W, 100); ctx.fillStyle = '#5a5a5a'; ctx.fillRect(W/2 - 60, H - 100, 120, 100); ctx.strokeStyle = '#4a4a4a'; ctx.lineWidth = 1; for (var i = 0; i < 5; i++) { ctx.beginPath(); ctx.moveTo(W/2 - 60, H - 100 + i * 20); ctx.lineTo(W/2 + 60, H - 100 + i * 20); ctx.stroke(); } } function drawMountainLayer(seed, color, baseY, height) { ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(0, baseY + height); for (var x = 0; x <= W; x += 20) { var y = baseY + Math.sin(x * 0.01 + seed * 10) * height * 0.4 + Math.sin(x * 0.025 + seed * 5) * height * 0.3 + Math.sin(x * 0.005 + seed * 20) * height * 0.3; ctx.lineTo(x, y); } ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill(); } function drawClouds() { var time = Date.now() / 3000; ctx.fillStyle = 'rgba(200, 210, 220, 0.08)'; for (var i = 0; i < 5; i++) { var cx = ((i * 130 + time * 30) % (W + 200)) - 100; var cy = 150 + i * 40 + Math.sin(time + i) * 10; ctx.beginPath(); ctx.ellipse(cx, cy, 80 + i * 10, 20 + i * 3, 0, 0, Math.PI * 2); ctx.fill(); } } function drawGate() { var gx = W / 2; var gy = 420; ctx.fillStyle = '#6b6b6b'; ctx.fillRect(gx - 140, gy + 80, 280, 20); ctx.fillStyle = '#8b7355'; ctx.fillRect(gx - 130, gy - 60, 25, 140); ctx.fillRect(gx + 105, gy - 60, 25, 140); ctx.fillStyle = '#7a6548'; ctx.fillRect(gx - 12, gy - 40, 24, 120); ctx.fillStyle = '#5c4033'; ctx.fillRect(gx - 145, gy - 70, 290,
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>吕洞宾大战梁冀</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #0a0a1a; display: flex; justify-content: center; align-items: center; min-height: 100vh; font-family: 'Microsoft YaHei', sans-serif; overflow: hidden; }
+        #gameContainer { position: relative; width: 480px; height: 720px; }
+        canvas { display: block; border-radius: 12px; box-shadow: 0 0 40px rgba(0,0,0,0.6); cursor: crosshair; }
+        #ui { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; justify-content: space-between; color: #fff; font-size: 16px; text-shadow: 2px 2px 4px rgba(0,0,0,0.9); pointer-events: none; z-index: 10; }
+        #startScreen, #gameOverScreen { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; background: rgba(0,0,0,0.75); border-radius: 12px; z-index: 20; }
+        #startScreen h1, #gameOverScreen h1 { color: #ffd700; font-size: 30px; margin-bottom: 20px; text-shadow: 2px 2px 8px rgba(0,0,0,0.8); }
+        #startScreen p, #gameOverScreen p { color: #ddd; font-size: 15px; margin-bottom: 8px; text-align: center; padding: 0 20px; }
+        .btn { margin-top: 20px; padding: 12px 40px; font-size: 20px; background: #c0392b; color: #fff; border: none; border-radius: 8px; cursor: pointer; transition: transform 0.1s; font-family: 'Microsoft YaHei', sans-serif; }
+        .btn:hover { transform: scale(1.05); background: #e74c3c; }
+        .btn:active { transform: scale(0.95); }
+        #finalScore { color: #ffd700; font-size: 28px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="480" height="720"></canvas>
+        <div id="ui">
+            <span id="scoreText">分数: 0</span>
+            <span id="levelText">关卡: 1</span>
+            <span id="ammoText">弹药: 5</span>
+        </div>
+        <div id="startScreen">
+            <h1>🏹 吕洞宾大战梁冀</h1>
+            <p>拖拽瞄准，松手发射吕洞宾</p>
+            <p>消灭所有梁冀即可过关！</p>
+            <p>⚠️ 小心方块里的梁冀会突然跳出来！</p>
+            <button class="btn" id="startBtn">开始游戏</button>
+        </div>
+        <div id="gameOverScreen" style="display:none;">
+            <h1 id="endTitle">游戏结束</h1>
+            <p id="endMsg"></p>
+            <div id="finalScore"></div>
+            <button class="btn" id="restartBtn">再来一次</button>
+        </div>
+    </div>
+
+<script>
+// ===== 音频系统 =====
+var AudioCtx = window.AudioContext || window.webkitAudioContext;
+var audioCtx;
+
+function initAudio() {
+    if (!audioCtx) audioCtx = new AudioCtx();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+function playNote(freq, duration, type, volume) {
+    if (!audioCtx) return;
+    type = type || 'square';
+    volume = volume || 0.15;
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + duration);
+}
+
+function playLaunchSound() {
+    if (!audioCtx) return;
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.15);
+    gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.2);
+}
+
+function playHitSound() {
+    playNote(300, 0.1, 'square', 0.15);
+    setTimeout(function() { playNote(200, 0.15, 'sawtooth', 0.1); }, 50);
+}
+
+function playDestroySound() {
+    playNote(523, 0.1, 'square', 0.12);
+    setTimeout(function() { playNote(659, 0.1, 'square', 0.12); }, 80);
+    setTimeout(function() { playNote(784, 0.15, 'square', 0.15); }, 160);
+}
+
+function playBoxOpenSound() {
+    playNote(150, 0.15, 'sawtooth', 0.12);
+    setTimeout(function() { playNote(100, 0.2, 'sawtooth', 0.1); }, 100);
+    setTimeout(function() { playNote(250, 0.1, 'square', 0.15); }, 250);
+}
+
+function playGameOverSound() {
+    playNote(400, 0.2, 'square', 0.12);
+    setTimeout(function() { playNote(300, 0.2, 'square', 0.12); }, 200);
+    setTimeout(function() { playNote(200, 0.4, 'sawtooth', 0.1); }, 400);
+}
+
+function playWinSound() {
+    var notes = [523, 587, 659, 784, 880, 1047];
+    notes.forEach(function(freq, i) {
+        setTimeout(function() { playNote(freq, 0.15, 'square', 0.12); }, i * 100);
+    });
+}
+
+// ===== BGM =====
+var bgmInterval = null;
+var bgmMelody = [
+    [523,1],[587,1],[659,1],[784,1], [659,1],[587,1],[523,2],
+    [784,1],[880,1],[784,1],[659,1], [587,1],[523,1],[587,2],
+    [523,1],[659,1],[784,1],[880,1], [1047,2],[880,1],[784,1],
+    [659,1],[523,1],[587,1],[659,1], [523,2],[0,2]
+];
+
+function startBGM() {
+    if (bgmInterval) return;
+    var noteIndex = 0;
+    var tempo = 220;
+    bgmInterval = setInterval(function() {
+        if (!audioCtx) return;
+        var note = bgmMelody[noteIndex % bgmMelody.length];
+        var freq = note[0];
+        var dur = note[1];
+        if (freq > 0) playNote(freq, (dur * tempo) / 1000, 'triangle', 0.06);
+        noteIndex++;
+    }, tempo);
+}
+
+function stopBGM() {
+    if (bgmInterval) { clearInterval(bgmInterval); bgmInterval = null; }
+}
+
+// ===== 游戏核心 =====
+var canvas = document.getElementById('gameCanvas');
+var ctx = canvas.getContext('2d');
+var W = canvas.width;
+var H = canvas.height;
+
+var score = 0;
+var level = 1;
+var ammo = 5;
+var gameRunning = false;
+var projectiles = [];
+var boxes = [];
+var enemies = [];
+var particles = [];
+var dragStart = null;
+var dragEnd = null;
+var isDragging = false;
+
+var launcher = { x: W / 2, y: H - 60, radius: 25 };
+
+var levelConfigs = [
+    [ { x: 80, y: 120 }, { x: 240, y: 80 }, { x: 400, y: 120 } ],
+    [ { x: 60, y: 100 }, { x: 180, y: 200 }, { x: 300, y: 100 }, { x: 420, y: 200 }, { x: 240, y: 300 } ],
+    [ { x: 60, y: 80 }, { x: 160, y: 80 }, { x: 260, y: 80 }, { x: 360, y: 80 }, { x: 460, y: 80 }, { x: 120, y: 200 }, { x: 360, y: 200 } ],
+    [ { x: 80, y: 100 }, { x: 240, y: 60 }, { x: 400, y: 100 }, { x: 160, y: 220 }, { x: 320, y: 220 }, { x: 240, y: 340 } ],
+    [ { x: 60, y: 80 }, { x: 180, y: 80 }, { x: 300, y: 80 }, { x: 420, y: 80 }, { x: 120, y: 200 }, { x: 360, y: 200 }, { x: 180, y: 320 }, { x: 300, y: 320 } ]
+];
+
+// ===== 绘制背景 =====
+function drawBackground() {
+    var skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+    skyGrad.addColorStop(0, '#1a1a3e'); skyGrad.addColorStop(0.3, '#2d3a5c');
+    skyGrad.addColorStop(0.6, '#4a6741'); skyGrad.addColorStop(1, '#2d4a2d');
+    ctx.fillStyle = skyGrad; ctx.fillRect(0, 0, W, H);
+    
+    drawMountainLayer(0.15, '#1a2a1a', 280, 120);
+    drawMountainLayer(0.25, '#1f3320', 320, 100);
+    drawMountainLayer(0.35, '#264028', 370, 80);
+    drawClouds();
+    drawGate();
+    
+    var groundGrad = ctx.createLinearGradient(0, H - 100, 0, H);
+    groundGrad.addColorStop(0, '#3d5c3a'); groundGrad.addColorStop(1, '#2a3d28');
+    ctx.fillStyle = groundGrad; ctx.fillRect(0, H - 100, W, 100);
+    
+    ctx.fillStyle = '#5a5a5a'; ctx.fillRect(W/2 - 60, H - 100, 120, 100);
+    ctx.strokeStyle = '#4a4a4a'; ctx.lineWidth = 1;
+    for (var i = 0; i < 5; i++) {
+        ctx.beginPath(); ctx.moveTo(W/2 - 60, H - 100 + i * 20); ctx.lineTo(W/2 + 60, H - 100 + i * 20); ctx.stroke();
+    }
+}
+
+function drawMountainLayer(seed, color, baseY, height) {
+    ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(0, baseY + height);
+    for (var x = 0; x <= W; x += 20) {
+        var y = baseY + Math.sin(x * 0.01 + seed * 10) * height * 0.4 + Math.sin(x * 0.025 + seed * 5) * height * 0.3 + Math.sin(x * 0.005 + seed * 20) * height * 0.3;
+        ctx.lineTo(x, y);
+    }
+    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
+}
+
+function drawClouds() {
+    var time = Date.now() / 3000;
+    ctx.fillStyle = 'rgba(200, 210, 220, 0.08)';
+    for (var i = 0; i < 5; i++) {
+        var cx = ((i * 130 + time * 30) % (W + 200)) - 100;
+        var cy = 150 + i * 40 + Math.sin(time + i) * 10;
+        ctx.beginPath(); ctx.ellipse(cx, cy, 80 + i * 10, 20 + i * 3, 0, 0, Math.PI * 2); ctx.fill();
+    }
+}
+
+function drawGate() {
+    var gx = W / 2; var gy = 420;
+    ctx.fillStyle = '#6b6b6b'; ctx.fillRect(gx - 140, gy + 80, 280, 20);
+    ctx.fillStyle = '#8b7355'; ctx.fillRect(gx - 130, gy - 60, 25, 140); ctx.fillRect(gx + 105, gy - 60, 25, 140);
+    ctx.fillStyle = '#7a6548'; ctx.fillRect(gx - 12, gy - 40, 24, 120);
+    ctx.fillStyle = '#5c4033'; ctx.fillRect(gx - 145, gy - 70, 290,
